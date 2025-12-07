@@ -1,8 +1,8 @@
 /* ===========================================================
    STAGING RAW TABLES CREATION SCRIPT
-   DS206 Project 2 — Group 1
    =========================================================== */
 
+-- Drop existing staging tables
 DROP TABLE IF EXISTS staging_Categories;
 DROP TABLE IF EXISTS staging_Customers;
 DROP TABLE IF EXISTS staging_Employees;
@@ -36,7 +36,7 @@ CREATE TABLE staging_Customers (
     Address NVARCHAR(255),
     City NVARCHAR(255),
     Region NVARCHAR(255),
-    PostalCode NVARCHAR(20),
+    PostalCode NVARCHAR(50),
     Country NVARCHAR(255),
     Phone NVARCHAR(50),
     Fax NVARCHAR(50)
@@ -51,16 +51,16 @@ CREATE TABLE staging_Employees (
     LastName NVARCHAR(255),
     FirstName NVARCHAR(255),
     Title NVARCHAR(255),
-    TitleOfCourtesy NVARCHAR(255),
-    BirthDate DATETIME,
-    HireDate DATETIME,
+    TitleOfCourtesy NVARCHAR(50),
+    BirthDate NVARCHAR(50),
+    HireDate NVARCHAR(50),
     Address NVARCHAR(255),
     City NVARCHAR(255),
     Region NVARCHAR(255),
-    PostalCode NVARCHAR(20),
+    PostalCode NVARCHAR(50),
     Country NVARCHAR(255),
     HomePhone NVARCHAR(50),
-    Extension NVARCHAR(20),
+    Extension NVARCHAR(10),
     Notes NVARCHAR(MAX),
     ReportsTo INT,
     PhotoPath NVARCHAR(255)
@@ -73,7 +73,7 @@ CREATE TABLE staging_OrderDetails (
     staging_raw_id_sk INT IDENTITY(1,1) PRIMARY KEY,
     OrderID INT,
     ProductID INT,
-    UnitPrice DECIMAL(10,2),
+    UnitPrice FLOAT,
     Quantity INT,
     Discount FLOAT
 );
@@ -86,16 +86,16 @@ CREATE TABLE staging_Orders (
     OrderID INT,
     CustomerID NVARCHAR(50),
     EmployeeID INT,
-    OrderDate DATETIME,
-    RequiredDate DATETIME,
-    ShippedDate DATETIME,
+    OrderDate NVARCHAR(50),
+    RequiredDate NVARCHAR(50),
+    ShippedDate NVARCHAR(50),
     ShipVia INT,
-    Freight DECIMAL(10,2),
+    Freight FLOAT,
     ShipName NVARCHAR(255),
     ShipAddress NVARCHAR(255),
     ShipCity NVARCHAR(255),
     ShipRegion NVARCHAR(255),
-    ShipPostalCode NVARCHAR(20),
+    ShipPostalCode NVARCHAR(50),
     ShipCountry NVARCHAR(255),
     TerritoryID NVARCHAR(50)
 );
@@ -110,11 +110,11 @@ CREATE TABLE staging_Products (
     SupplierID INT,
     CategoryID INT,
     QuantityPerUnit NVARCHAR(255),
-    UnitPrice DECIMAL(10,2),
+    UnitPrice FLOAT,
     UnitsInStock INT,
     UnitsOnOrder INT,
     ReorderLevel INT,
-    Discontinued BIT
+    Discontinued NVARCHAR(10)
 );
 
 ---------------------------------------------------------------
@@ -150,7 +150,7 @@ CREATE TABLE staging_Suppliers (
     Address NVARCHAR(255),
     City NVARCHAR(255),
     Region NVARCHAR(255),
-    PostalCode NVARCHAR(20),
+    PostalCode NVARCHAR(50),
     Country NVARCHAR(255),
     Phone NVARCHAR(50),
     Fax NVARCHAR(50),
@@ -164,6 +164,6 @@ CREATE TABLE staging_Territories (
     staging_raw_id_sk INT IDENTITY(1,1) PRIMARY KEY,
     TerritoryID NVARCHAR(50),
     TerritoryDescription NVARCHAR(255),
-    TerritoryCode NVARCHAR(255),
+    TerritoryCode NVARCHAR(10),
     RegionID INT
 );

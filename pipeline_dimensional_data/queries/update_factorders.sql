@@ -1,54 +1,50 @@
 /* ===========================================================
-   update_fact.sql
-   SNAPSHOT FACT LOADER WITH DATE FILTERING
+   update_factorders.sql
+   SNAPSHOT FACT — FactOrders
    =========================================================== */
 
 ---------------------------------------------------------------
 -- PARAMETERS passed from Python:
 -- @database_name
 -- @schema_name
--- @fact_table_name
--- @orders_staging_table
--- @details_staging_table
--- @start_date
--- @end_date
+-- @fact_table_name         (FactOrders)
+-- @orders_staging_table    (staging_Orders)
+-- @details_staging_table   (staging_OrderDetails)
 ---------------------------------------------------------------
 
 DECLARE @SQL NVARCHAR(MAX);
 DECLARE @SOR_SK INT;
 
 ---------------------------------------------------------------
--- 1. Ensure SOR entry exists for Fact snapshot operations
+-- 1. Ensure SOR entry exists for FactOrders snapshot load
 ---------------------------------------------------------------
 SET @SQL = '
 INSERT INTO ' + QUOTENAME(@database_name) + '.dbo.Dim_SOR (SOR_Name)
 SELECT ''FACT_ORDERS_SNAPSHOT''
 WHERE NOT EXISTS (
-    SELECT 1 
-    FROM ' + QUOTENAME(@database_name) + '.dbo.Dim_SOR 
+    SELECT 1 FROM ' + QUOTENAME(@database_name) + '.dbo.Dim_SOR
     WHERE SOR_Name = ''FACT_ORDERS_SNAPSHOT''
 );';
 
 EXEC(@SQL);
 
 ---------------------------------------------------------------
--- 2. Retrieve SOR_SK
+-- 2. Retrieve SOR_SK for snapshot
 ---------------------------------------------------------------
 SELECT @SOR_SK = SOR_SK
-FROM ' + QUOTENAME(@database_name) + '.dbo.Dim_SOR
-WHERE SOR_Name = ''FACT_ORDERS_SNAPSHOT'';
+FROM   ' + QUOTENAME(@database_name) + '.dbo.Dim_SOR
+WHERE  SOR_Name = ''FACT_ORDERS_SNAPSHOT'';
 
 ---------------------------------------------------------------
--- 3. Delete facts in the date range (partial refresh)
+-- 3. TRUNCATE snapshot fact table
 ---------------------------------------------------------------
-
 SET @SQL = '
-DELETE FROM ' + QUOTENAME(@database_name) + '.' + QUOTENAME(@schema_name) + '.' + QUOTENAME(@fact_table_name) + '
-WHERE OrderDate BETWEEN ''' + @start_date + ''' AND ''' + @end_date + ''';';
+TRUNCATE TABLE ' + QUOTENAME(@database_name) + '.' + QUOTENAME(@schema_name) + '.' + QUOTENAME(@fact_table_name) + ';
+';
 EXEC(@SQL);
 
 ---------------------------------------------------------------
--- 4. Insert snapshot fact rows
+-- 4. Insert new snapshot rows
 ---------------------------------------------------------------
 
 SET @SQL = '
@@ -74,8 +70,8 @@ INSERT INTO ' + QUOTENAME(@database_name) + '.' + QUOTENAME(@schema_name) + '.' 
 )
 
 SELECT
-    o.OrderID         AS Order_NK,
-    d.ProductID       AS Product_NK,
+    o.OrderID        AS Order_NK,
+    d.ProductID      AS Product_NK,
 
     dc.Customer_SK,
     de.Employee_SK,
@@ -100,7 +96,6 @@ SELECT
 FROM ' + QUOTENAME(@database_name) + '.' + QUOTENAME(@schema_name) + '.' + QUOTENAME(@details_staging_table) + ' d
 JOIN ' + QUOTENAME(@database_name) + '.' + QUOTENAME(@schema_name) + '.' + QUOTENAME(@orders_staging_table) + ' o
     ON o.OrderID = d.OrderID
-    AND o.OrderDate BETWEEN ''' + @start_date + ''' AND ''' + @end_date + '''
 
 LEFT JOIN ' + QUOTENAME(@database_name) + '.dbo.DimCustomers dc
     ON dc.Customer_NK = o.CustomerID AND dc.IsCurrent = 1
