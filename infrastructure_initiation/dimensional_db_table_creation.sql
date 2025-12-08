@@ -18,7 +18,6 @@ DROP TABLE IF EXISTS DimEmployees;
 DROP TABLE IF EXISTS DimCustomers;
 DROP TABLE IF EXISTS DimCategories;
 DROP TABLE IF EXISTS Dim_SOR;
-GO
 
 
 /* ===========================================================
@@ -29,7 +28,6 @@ CREATE TABLE Dim_SOR (
     SOR_SK INT IDENTITY(1,1) PRIMARY KEY,
     SOR_Name NVARCHAR(255) NOT NULL
 );
-GO
 
 
 /* ===========================================================
@@ -52,7 +50,6 @@ CREATE TABLE DimCategories (
 
     FOREIGN KEY (SOR_SK) REFERENCES Dim_SOR(SOR_SK)
 );
-GO
 
 
 /* ===========================================================
@@ -85,7 +82,6 @@ CREATE TABLE DimCustomers (
 
     FOREIGN KEY (SOR_SK) REFERENCES Dim_SOR(SOR_SK)
 );
-GO
 
 
 /* ===========================================================
@@ -121,11 +117,10 @@ CREATE TABLE DimEmployees (
 
     FOREIGN KEY (SOR_SK) REFERENCES Dim_SOR(SOR_SK)
 );
-GO
 
 
 /* ===========================================================
-   DimSuppliers — SCD4 Mini-Dimension
+   DimSuppliers — SCD4 Dimension
    =========================================================== */
 
 CREATE TABLE DimSuppliers (
@@ -146,14 +141,11 @@ CREATE TABLE DimSuppliers (
     Fax NVARCHAR(50),
     HomePage NVARCHAR(MAX),
 
-    MiniGroup NVARCHAR(50),
-
     SOR_SK INT,
     LoadDate DATETIME DEFAULT GETDATE(),
 
     FOREIGN KEY (SOR_SK) REFERENCES Dim_SOR(SOR_SK)
 );
-GO
 
 
 /* ===========================================================
@@ -186,7 +178,6 @@ CREATE TABLE DimProducts (
 
     FOREIGN KEY (SOR_SK) REFERENCES Dim_SOR(SOR_SK)
 );
-GO
 
 
 /* ===========================================================
@@ -208,7 +199,6 @@ CREATE TABLE DimRegion (
 
     FOREIGN KEY (SOR_SK) REFERENCES Dim_SOR(SOR_SK)
 );
-GO
 
 
 /* ===========================================================
@@ -229,7 +219,6 @@ CREATE TABLE DimShippers (
 
     FOREIGN KEY (SOR_SK) REFERENCES Dim_SOR(SOR_SK)
 );
-GO
 
 
 /* ===========================================================
@@ -252,7 +241,6 @@ CREATE TABLE DimTerritories (
 
     FOREIGN KEY (SOR_SK) REFERENCES Dim_SOR(SOR_SK)
 );
-GO
 
 
 /* ===========================================================
@@ -295,4 +283,3 @@ CREATE TABLE FactOrders (
     FOREIGN KEY (Territory_SK) REFERENCES DimTerritories(Territory_SK),
     FOREIGN KEY (Region_SK)   REFERENCES DimRegion(Region_SK)
 );
-GO

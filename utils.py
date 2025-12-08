@@ -1,14 +1,15 @@
 """
 utils.py
-Flow-agnostic utility functions for DS206 Project 2 ETL Pipeline.
 
-Provides:
-- read_sql_file: loads .sql script content.
-- load_db_config: parses sql_server_config.cfg.
-- create_db_connection: returns a live SQL Server connection.
-- execute_sql_with_params: runs parametrized SQL scripts.
-- get_uuid: generates unique execution identifiers.
-- get_timestamp: returns standardized timestamps.
+Utility functions for DS206 Project 2 ETL Pipeline.
+
+Supports:
+- Reading SQL files from disk
+- Replacing T-SQL style template parameters (@param)
+- Loading SQL Server config
+- Creating DB connections via pyodbc
+- Executing parameterized SQL scripts
+- Generating UUIDs & timestamps
 """
 
 import os
@@ -19,53 +20,55 @@ import configparser
 
 
 # ==============================================================
-# 1. Read SQL script from .sql file
+# 1. Read SQL file
 # ==============================================================
 
 def read_sql_file(filepath: str) -> str:
-    """
-    Load SQL content from a .sql file.
-
-    Parameters
-    ----------
-    filepath : str
-        Path to the SQL file.
-
-    Returns
-    -------
-    str
-        The entire SQL script as a single string.
-    """
+    """Return SQL script content from a file."""
     if not os.path.exists(filepath):
         raise FileNotFoundError(f"SQL file not found: {filepath}")
 
-    with open(filepath, "r", encoding="utf-8") as file:
-        return file.read()
+    with open(filepath, "r", encoding="utf-8") as f:
+        return f.read()
 
 
 # ==============================================================
-# 2. Parse database config file (sql_server_config.cfg)
+# 2. Replace @variables inside SQL script
+# ==============================================================
+
+def render_sql(sql_text: str, params: dict) -> str:
+    """
+    Replace T-SQL template parameters (@param_name) with actual values.
+
+    Example:
+        @database_name → DS206_DB
+        @schema_name → dbo
+    """
+    for key, value in params.items():
+        sql_text = sql_text.replace(f"@{key}", str(value))
+
+    return sql_text
+
+
+# ==============================================================
+# 3. Load DB config file
 # ==============================================================
 
 def load_db_config(cfg_path: str = "sql_server_config.cfg") -> dict:
-    """
-    Parse SQL Server configuration from cfg file.
+    """Load config from the project root regardless of where Python is executed."""
 
-    Parameters
-    ----------
-    cfg_path : str
-        Path to config file.
+    # Directory of this utils.py file
+    utils_dir = os.path.dirname(os.path.abspath(__file__))
 
-    Returns
-    -------
-    dict
-        A dictionary containing DB connection parameters.
-    """
-    if not os.path.exists(cfg_path):
-        raise FileNotFoundError(f"Config file not found: {cfg_path}")
+    project_root = utils_dir  
+
+    full_path = os.path.join(project_root, cfg_path)
+
+    if not os.path.exists(full_path):
+        raise FileNotFoundError(f"Config file not found: {full_path}")
 
     config = configparser.ConfigParser()
-    config.read(cfg_path)
+    config.read(full_path)
 
     db_cfg = config["sql_server"]
 
@@ -74,32 +77,22 @@ def load_db_config(cfg_path: str = "sql_server_config.cfg") -> dict:
         "database": db_cfg.get("database"),
         "username": db_cfg.get("username", ""),
         "password": db_cfg.get("password", ""),
-        "driver": db_cfg.get("driver", "ODBC Driver 17 for SQL Server"),
+        "driver": db_cfg.get("driver", "ODBC Driver 18 for SQL Server"),
         "trusted_connection": db_cfg.get("trusted_connection", "no"),
-        "encrypt": db_cfg.get("encrypt", "optional"),
+        "encrypt": db_cfg.get("encrypt", "no"),
         "trust_server_certificate": db_cfg.get("trust_server_certificate", "yes")
     }
 
 
+
 # ==============================================================
-# 3. Create SQL Server connection
+# 4. Create SQL connection (pyodbc)
 # ==============================================================
 
 def create_db_connection(cfg: dict):
-    """
-    Establish a live SQL Server connection.
+    """Return a live SQL Server connection."""
 
-    Parameters
-    ----------
-    cfg : dict
-        Result of load_db_config().
-
-    Returns
-    -------
-    pyodbc.Connection
-        Active database connection object.
-    """
-
+    # Build connection string
     if cfg["trusted_connection"].lower() == "yes":
         conn_str = (
             f"DRIVER={{{cfg['driver']}}};"
@@ -112,7 +105,7 @@ def create_db_connection(cfg: dict):
     else:
         conn_str = (
             f"DRIVER={{{cfg['driver']}}};"
-            f"SERVER={cfg['server']}}};"
+            f"SERVER={cfg['server']};"
             f"DATABASE={cfg['database']};"
             f"UID={cfg['username']};"
             f"PWD={cfg['password']};"
@@ -123,60 +116,29 @@ def create_db_connection(cfg: dict):
     try:
         return pyodbc.connect(conn_str)
     except Exception as e:
-        raise ConnectionError(f"Failed to connect to SQL Server: {e}")
-
+        raise ConnectionError(f"Failed SQL connection: {e}")
 
 # ==============================================================
-# 4. Execute SQL script with parameters
+# 5. Execute SQL (with replaced params)
 # ==============================================================
 
-def execute_sql_with_params(conn, sql_text: str, params: dict = None):
-    """
-    Execute SQL with parameter substitution.
-
-    Parameters
-    ----------
-    conn : pyodbc.Connection
-        Open database connection.
-
-    sql_text : str
-        The SQL script content.
-
-    params : dict
-        Dictionary of parameters to replace inside SQL script.
-
-    Returns
-    -------
-    None
-    """
+def execute_sql(conn, sql_text: str):
+    """Execute SQL using pyodbc."""
     cursor = conn.cursor()
-
-    if params:
-        for key, value in params.items():
-            placeholder = f"@{key}"
-            sql_text = sql_text.replace(placeholder, f"'{value}'")
-
     try:
         cursor.execute(sql_text)
         conn.commit()
     except Exception as e:
         conn.rollback()
-        raise RuntimeError(f"Failed executing SQL script: {e}")
+        raise RuntimeError(f"SQL execution failed: {e}")
 
 
 # ==============================================================
-# 5. Generate unique execution UUID
+# 6. UUID + timestamp helpers
 # ==============================================================
 
 def get_uuid() -> str:
-    """Return a unique execution UUID string."""
     return str(uuid.uuid4())
 
-
-# ==============================================================
-# 6. Standardized timestamp helper
-# ==============================================================
-
 def get_timestamp() -> str:
-    """Return current timestamp in ISO format."""
     return datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")

@@ -1,12 +1,15 @@
 """
 tasks.py
-Contains ETL task-level functions for DS206 Project 2.
-These tasks execute parametrized SQL scripts in the correct sequence.
-Each task returns {'success': True/False} and accepts prerequisites.
+Task-level ETL functions for DS206 Project 2.
+Each task:
+  - loads SQL template
+  - substitutes T-SQL parameters (@param)
+  - executes batches (GO separated)
+  - returns {"success": True/False, "message": "..."}
 """
 
-import sys
 import os
+import sys
 
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, PROJECT_ROOT)
@@ -15,40 +18,38 @@ from utils import (
     load_db_config,
     create_db_connection,
     read_sql_file,
-    execute_sql_with_params
+    render_sql,
+    execute_sql
 )
 
-# --------------------------------------------------------
-# Helper: run a parametrized SQL file
-# --------------------------------------------------------
+
+# ==============================================================
+# Helper — run a single parametrized SQL script
+# ==============================================================
+
 def run_sql_task(sql_path: str, params: dict) -> dict:
     """
-    Execute a parametrized SQL script inside a database transaction.
-    Automatically splits SQL batches separated by 'GO'.
+    Execute a parametrized SQL script.
+    Handles:
+      - @parameter substitution
+      - splitting batches by GO
+      - atomicity
     """
-
     try:
-        cfg = load_db_config("sql_server_config.cfg")
+        cfg = load_db_config()
         conn = create_db_connection(cfg)
-        cursor = conn.cursor()
 
         sql_text = read_sql_file(sql_path)
+        sql_rendered = render_sql(sql_text, params)
 
-        # Replace parameters
-        if params:
-            for key, value in params.items():
-                sql_text = sql_text.replace(f"@{key}", str(value))
-
-        # Split batches by GO (case-insensitive, standalone)
+        # split into batches
         batches = [
-            batch.strip()
-            for batch in sql_text.split("\nGO")
+            batch.strip() for batch in sql_rendered.split("\nGO")
             if batch.strip()
         ]
 
         for batch in batches:
-            cursor.execute(batch)
-            conn.commit()
+            execute_sql(conn, batch)
 
         conn.close()
         return {"success": True}
@@ -57,66 +58,190 @@ def run_sql_task(sql_path: str, params: dict) -> dict:
         return {"success": False, "message": str(e)}
 
 
+# ==============================================================
+# 1. Create Dimensional Tables
+# ==============================================================
+
 def task_create_dimensional_tables() -> dict:
-    """
-    Create all dimensional tables using the predefined SQL script.
-
-    This task executes the dimensional_db_table_creation.sql file,
-    which contains CREATE TABLE statements for all dimensions and fact tables.
-
-    Returns
-    -------
-    dict
-        {"success": True} if tables were created successfully,
-        otherwise {"success": False, "message": "..."}.
-    """
     sql_path = os.path.join(
-        PROJECT_ROOT,
-        "infrastructure_initiation",
-        "dimensional_db_table_creation.sql"
+        PROJECT_ROOT, "infrastructure_initiation", "dimensional_db_table_creation.sql"
     )
 
     params = {
-        "database": "ORDER_DDS",
-        "schema": "dbo"
+        "database_name": "ORDER_DDS",
+        "schema_name": "dbo"
     }
 
     return run_sql_task(sql_path, params)
 
-def task_update_dim_categories(prerequisite: dict = None) -> dict:
-    """
-    Load data into Dim_Categories from staging_Categories.
 
-    Parameters
-    ----------
-    prerequisite : dict
-        Output of the previous task. If provided and not successful,
-        this task will not run.
+# ==============================================================
+# Dimensional Load Tasks (SCD1 / SCD2 / SCD3 / SCD4)
+# ==============================================================
 
-    Returns
-    -------
-    dict
-        {"success": True} if ingestion completed successfully,
-        otherwise {"success": False, "message": "..."}.
-    """
+def task_update_dim_categories(prereq=None) -> dict:
+    if prereq and not prereq.get("success"):
+        return {"success": False, "message": "Prerequisite failed"}
 
-    # Check prerequisite
-    if prerequisite and not prerequisite.get("success", False):
-        return {"success": False, "message": "Prerequisite task failed"}
-
-    # SQL file path
-    sql_path = os.path.join(
-        PROJECT_ROOT,
-        "pipeline_dimensional_data",
-        "queries",
-        "update_dim_categories.sql"
-    )
-    # Parameters used inside SQL script
+    sql_path = os.path.join(PROJECT_ROOT, "pipeline_dimensional_data/queries/update_dim_categories.sql")
     params = {
         "database_name": "ORDER_DDS",
         "schema_name": "dbo",
         "dim_table_name": "DimCategories",
         "staging_table_name": "staging_Categories"
-            }
+    }
+    return run_sql_task(sql_path, params)
 
+
+def task_update_dim_customers(prereq=None) -> dict:
+    if prereq and not prereq.get("success"):
+        return {"success": False, "message": "Prerequisite failed"}
+
+    sql_path = os.path.join(PROJECT_ROOT, "pipeline_dimensional_data/queries/update_dim_customers.sql")
+    params = {
+        "database_name": "ORDER_DDS",
+        "schema_name": "dbo",
+        "dim_table_name": "DimCustomers",
+        "staging_table_name": "staging_Customers"
+    }
+    return run_sql_task(sql_path, params)
+
+
+def task_update_dim_employees(prereq=None) -> dict:
+    if prereq and not prereq.get("success"):
+        return {"success": False, "message": "Prerequisite failed"}
+
+    sql_path = os.path.join(PROJECT_ROOT, "pipeline_dimensional_data/queries/update_dim_employees.sql")
+    params = {
+        "database_name": "ORDER_DDS",
+        "schema_name": "dbo",
+        "dim_table_name": "DimEmployees",
+        "staging_table_name": "staging_Employees"
+    }
+    return run_sql_task(sql_path, params)
+
+
+def task_update_dim_products(prereq=None) -> dict:
+    if prereq and not prereq.get("success"):
+        return {"success": False, "message": "Prerequisite failed"}
+
+    sql_path = os.path.join(PROJECT_ROOT, "pipeline_dimensional_data/queries/update_dim_products.sql")
+    params = {
+        "database_name": "ORDER_DDS",
+        "schema_name": "dbo",
+        "dim_table_name": "DimProducts",
+        "staging_table_name": "staging_Products"
+    }
+    return run_sql_task(sql_path, params)
+
+
+def task_update_dim_region(prereq=None) -> dict:
+    if prereq and not prereq.get("success"):
+        return {"success": False, "message": "Prerequisite failed"}
+
+    sql_path = os.path.join(PROJECT_ROOT, "pipeline_dimensional_data/queries/update_dim_region.sql")
+    params = {
+        "database_name": "ORDER_DDS",
+        "schema_name": "dbo",
+        "dim_table_name": "DimRegion",
+        "staging_table_name": "staging_Region"
+    }
+    return run_sql_task(sql_path, params)
+
+
+def task_update_dim_shippers(prereq=None) -> dict:
+    if prereq and not prereq.get("success"):
+        return {"success": False, "message": "Prerequisite failed"}
+
+    sql_path = os.path.join(PROJECT_ROOT, "pipeline_dimensional_data/queries/update_dim_shippers.sql")
+    params = {
+        "database_name": "ORDER_DDS",
+        "schema_name": "dbo",
+        "dim_table_name": "DimShippers",
+        "staging_table_name": "staging_Shippers"
+    }
+    return run_sql_task(sql_path, params)
+
+
+def task_update_dim_suppliers(prereq=None) -> dict:
+    if prereq and not prereq.get("success"):
+        return {"success": False, "message": "Prerequisite failed"}
+
+    sql_path = os.path.join(PROJECT_ROOT, "pipeline_dimensional_data/queries/update_dim_suppliers.sql")
+    params = {
+        "database_name": "ORDER_DDS",
+        "schema_name": "dbo",
+        "dim_table_name": "DimSuppliers",
+        "staging_table_name": "staging_Suppliers"
+    }
+    return run_sql_task(sql_path, params)
+
+
+def task_update_dim_territories(prereq=None) -> dict:
+    if prereq and not prereq.get("success"):
+        return {"success": False, "message": "Prerequisite failed"}
+
+    sql_path = os.path.join(PROJECT_ROOT, "pipeline_dimensional_data/queries/update_dim_territories.sql")
+    params = {
+        "database_name": "ORDER_DDS",
+        "schema_name": "dbo",
+        "dim_table_name": "DimTerritories",
+        "staging_table_name": "staging_Territories"
+    }
+    return run_sql_task(sql_path, params)
+
+
+# ==============================================================
+# Fact Tasks (Snapshot Fact + Fact Error)
+# ==============================================================
+
+def task_update_factorders(prereq=None, start_date=None, end_date=None) -> dict:
+    if prereq and not prereq.get("success"):
+        return {"success": False, "message": "Prerequisite failed"}
+
+    sql_path = os.path.join(
+        PROJECT_ROOT,
+        "pipeline_dimensional_data/queries/update_factorders.sql"
+    )
+
+    params = {
+        "database_name": "ORDER_DDS",
+        "schema_name": "dbo",
+        "fact_table_name": "FactOrders",
+        "orders_staging_table": "staging_Orders",
+        "details_staging_table": "staging_OrderDetails"
+    }
+
+    return run_sql_task(sql_path, params)
+
+
+def task_update_fact(start_date, end_date, prereq=None) -> dict:
+    if prereq and not prereq.get("success"):
+        return {"success": False, "message": "Prerequisite failed"}
+
+    sql_path = os.path.join(PROJECT_ROOT, "pipeline_dimensional_data/queries/update_fact.sql")
+    params = {
+        "database_name": "ORDER_DDS",
+        "schema_name": "dbo",
+        "fact_table_name": "FactOrders",
+        "staging_table_name": "staging_Orders",
+        "start_date": start_date,
+        "end_date": end_date
+    }
+    return run_sql_task(sql_path, params)
+
+
+def task_update_fact_error(start_date, end_date, prereq=None) -> dict:
+    if prereq and not prereq.get("success"):
+        return {"success": False, "message": "Prerequisite failed"}
+
+    sql_path = os.path.join(PROJECT_ROOT, "pipeline_dimensional_data/queries/update_fact_error.sql")
+    params = {
+        "database_name": "ORDER_DDS",
+        "schema_name": "dbo",
+        "fact_error_table": "FactOrders_Error",
+        "staging_table_name": "staging_Orders",
+        "start_date": start_date,
+        "end_date": end_date
+    }
     return run_sql_task(sql_path, params)

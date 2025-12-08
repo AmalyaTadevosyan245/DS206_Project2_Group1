@@ -1,45 +1,42 @@
 /* ===========================================================
    update_dim_products.sql
-   SCD2 + Delete Closing — DimProducts (Group 1)
+   SCD2 + Delete Closing — DimProducts
    =========================================================== */
 
 ---------------------------------------------------------------
--- PARAMETERS passed from Python:
+-- PARAMETERS
 -- @database_name
 -- @schema_name
--- @dim_table_name        (DimProducts)
--- @staging_table_name    (staging_Products)
+-- @dim_table_name
+-- @staging_table_name
 ---------------------------------------------------------------
 
-DECLARE @SQL NVARCHAR(MAX);
-DECLARE @SOR_SK INT;
 
 ---------------------------------------------------------------
 -- 1. Ensure SOR entry exists
 ---------------------------------------------------------------
-SET @SQL = '
-INSERT INTO ' + QUOTENAME(@database_name) + '.dbo.Dim_SOR (SOR_Name)
-SELECT ''' + @staging_table_name + '''
+INSERT INTO @database_name.@schema_name.Dim_SOR (SOR_Name)
+SELECT '@staging_table_name'
 WHERE NOT EXISTS (
-    SELECT 1 
-    FROM ' + QUOTENAME(@database_name) + '.dbo.Dim_SOR
-    WHERE SOR_Name = ''' + @staging_table_name + '''
-);';
+    SELECT 1
+    FROM @database_name.@schema_name.Dim_SOR
+    WHERE SOR_Name = '@staging_table_name'
+);
 
-EXEC(@SQL);
 
 ---------------------------------------------------------------
--- 2. Get SOR_SK
+-- 2. Retrieve SOR_SK
 ---------------------------------------------------------------
+DECLARE @SOR_SK INT;
+
 SELECT @SOR_SK = SOR_SK
-FROM   ' + QUOTENAME(@database_name) + '.dbo.Dim_SOR
-WHERE  SOR_Name = @staging_table_name;
+FROM @database_name.@schema_name.Dim_SOR
+WHERE SOR_Name = '@staging_table_name';
+
 
 ---------------------------------------------------------------
--- 3. MERGE: Detect changes for SCD2
+-- 3. SCD2 MERGE (detect changes → close old version)
 ---------------------------------------------------------------
-
-SET @SQL = '
 ;WITH INCOMING AS (
     SELECT
         ProductID AS Product_NK,
@@ -53,12 +50,11 @@ SET @SQL = '
         ReorderLevel,
         Discontinued,
         staging_raw_id_sk
-    FROM ' + QUOTENAME(@database_name) + '.' + QUOTENAME(@schema_name) + '.' + QUOTENAME(@staging_table_name) + '
+    FROM @database_name.@schema_name.@staging_table_name
 ),
-
 CURRENT_ROWS AS (
     SELECT *
-    FROM ' + QUOTENAME(@database_name) + '.' + QUOTENAME(@schema_name) + '.' + QUOTENAME(@dim_table_name) + '
+    FROM @database_name.@schema_name.@dim_table_name
     WHERE IsCurrent = 1
 )
 
@@ -66,27 +62,23 @@ MERGE CURRENT_ROWS AS TARGET
 USING INCOMING AS SOURCE
 ON TARGET.Product_NK = SOURCE.Product_NK
 
----------------------------------------------------------------
--- 3A. When a change is detected → close old row
----------------------------------------------------------------
+-- 3A. Change detected → close existing version
 WHEN MATCHED AND (
-       ISNULL(TARGET.ProductName,'''')        <> ISNULL(SOURCE.ProductName,'''')
-    OR ISNULL(TARGET.Supplier_NK,-1)          <> ISNULL(SOURCE.Supplier_NK,-1)
-    OR ISNULL(TARGET.Category_NK,-1)          <> ISNULL(SOURCE.Category_NK,-1)
-    OR ISNULL(TARGET.QuantityPerUnit,'''')    <> ISNULL(SOURCE.QuantityPerUnit,'''')
-    OR ISNULL(TARGET.UnitPrice,-1)            <> ISNULL(SOURCE.UnitPrice,-1)
-    OR ISNULL(TARGET.UnitsInStock,-1)         <> ISNULL(SOURCE.UnitsInStock,-1)
-    OR ISNULL(TARGET.UnitsOnOrder,-1)         <> ISNULL(SOURCE.UnitsOnOrder,-1)
-    OR ISNULL(TARGET.ReorderLevel,-1)         <> ISNULL(SOURCE.ReorderLevel,-1)
-    OR ISNULL(TARGET.Discontinued,'''')       <> ISNULL(SOURCE.Discontinued,'''')
+       ISNULL(TARGET.ProductName,'')      <> ISNULL(SOURCE.ProductName,'')
+    OR ISNULL(TARGET.Supplier_NK,-1)      <> ISNULL(SOURCE.Supplier_NK,-1)
+    OR ISNULL(TARGET.Category_NK,-1)      <> ISNULL(SOURCE.Category_NK,-1)
+    OR ISNULL(TARGET.QuantityPerUnit,'')  <> ISNULL(SOURCE.QuantityPerUnit,'')
+    OR ISNULL(TARGET.UnitPrice,-1)        <> ISNULL(SOURCE.UnitPrice,-1)
+    OR ISNULL(TARGET.UnitsInStock,-1)     <> ISNULL(SOURCE.UnitsInStock,-1)
+    OR ISNULL(TARGET.UnitsOnOrder,-1)     <> ISNULL(SOURCE.UnitsOnOrder,-1)
+    OR ISNULL(TARGET.ReorderLevel,-1)     <> ISNULL(SOURCE.ReorderLevel,-1)
+    OR ISNULL(TARGET.Discontinued,'')     <> ISNULL(SOURCE.Discontinued,'')
 )
 THEN UPDATE SET
-       TARGET.ValidTo = GETDATE(),
+       TARGET.ValidTo   = GETDATE(),
        TARGET.IsCurrent = 0
 
----------------------------------------------------------------
--- 3B. Insert new rows (new NKs or new versions)
----------------------------------------------------------------
+-- 3B. Insert new NKs or fresh versions
 WHEN NOT MATCHED BY TARGET
 THEN INSERT (
         Product_NK,
@@ -119,23 +111,19 @@ THEN INSERT (
         SOURCE.ReorderLevel,
         SOURCE.Discontinued,
         GETDATE(),           -- ValidFrom
-        ''9999-12-31'',       -- ValidTo open-ended
-        1,                    -- IsCurrent
-        0,                    -- IsClosed always 0 on fresh load
-        ' + CAST(@SOR_SK AS NVARCHAR) + ',
+        '9999-12-31',        -- ValidTo open-ended
+        1,                   -- IsCurrent
+        0,                   -- IsClosed
+        @SOR_SK,
         SOURCE.staging_raw_id_sk,
         GETDATE()
     );
-';
-
-EXEC(@SQL);
 
 
 ---------------------------------------------------------------
--- 4. Insert new versions for products whose old rows were closed
+-- 4. Insert new versions for rows closed today (new SCD2 versions)
 ---------------------------------------------------------------
-SET @SQL = '
-INSERT INTO ' + QUOTENAME(@database_name) + '.' + QUOTENAME(@schema_name) + '.' + QUOTENAME(@dim_table_name) + ' (
+INSERT INTO @database_name.@schema_name.@dim_table_name (
         Product_NK,
         ProductName,
         Supplier_NK,
@@ -155,51 +143,45 @@ INSERT INTO ' + QUOTENAME(@database_name) + '.' + QUOTENAME(@schema_name) + '.' 
         LoadDate
 )
 SELECT 
-    i.Product_NK,
-    i.ProductName,
-    i.Supplier_NK,
-    i.Category_NK,
-    i.QuantityPerUnit,
-    i.UnitPrice,
-    i.UnitsInStock,
-    i.UnitsOnOrder,
-    i.ReorderLevel,
-    i.Discontinued,
-    GETDATE(),             -- new version ValidFrom
-    ''9999-12-31'',         -- open-ended ValidTo
-    1,                      -- IsCurrent
-    0,                      -- IsClosed
-    ' + CAST(@SOR_SK AS NVARCHAR) + ',
-    i.staging_raw_id_sk,
+    S.ProductID,
+    S.ProductName,
+    S.SupplierID,
+    S.CategoryID,
+    S.QuantityPerUnit,
+    S.UnitPrice,
+    S.UnitsInStock,
+    S.UnitsOnOrder,
+    S.ReorderLevel,
+    S.Discontinued,
+    GETDATE(),
+    '9999-12-31',
+    1,              -- new current row
+    0,              -- not closed
+    @SOR_SK,
+    S.staging_raw_id_sk,
     GETDATE()
-FROM INCOMING i
+FROM @database_name.@schema_name.@staging_table_name S
 WHERE EXISTS (
     SELECT 1
-    FROM ' + QUOTENAME(@database_name) + '.' + QUOTENAME(@schema_name) + '.' + QUOTENAME(@dim_table_name) + '
-    WHERE Product_NK = i.Product_NK
-      AND IsCurrent = 0
-      AND ValidTo = CONVERT(DATE, GETDATE())   -- closed today
+    FROM @database_name.@schema_name.@dim_table_name D
+    WHERE D.Product_NK = S.ProductID
+      AND D.IsCurrent = 0
+      AND CAST(D.ValidTo AS DATE) = CAST(GETDATE() AS DATE)
 );
-';
-
-EXEC(@SQL);
 
 
 ---------------------------------------------------------------
--- 5. Closing logic for missing NKs (DELETE CLOSING requirement)
+-- 5. Delete Closing — Close products missing from staging
 ---------------------------------------------------------------
-SET @SQL = '
 UPDATE T
-SET    T.ValidTo = GETDATE(),
-       T.IsCurrent = 0,
-       T.IsClosed = 1,
-       T.LoadDate = GETDATE(),
-       T.SOR_SK = ' + CAST(@SOR_SK AS NVARCHAR) + '
-FROM ' + QUOTENAME(@database_name) + '.' + QUOTENAME(@schema_name) + '.' + QUOTENAME(@dim_table_name) + ' T
+SET
+    T.ValidTo   = GETDATE(),
+    T.IsCurrent = 0,
+    T.IsClosed  = 1,
+    T.SOR_SK    = @SOR_SK,
+    T.LoadDate  = GETDATE()
+FROM @database_name.@schema_name.@dim_table_name T
 LEFT JOIN INCOMING S
        ON S.Product_NK = T.Product_NK
 WHERE S.Product_NK IS NULL
   AND T.IsCurrent = 1;
-';
-
-EXEC(@SQL);

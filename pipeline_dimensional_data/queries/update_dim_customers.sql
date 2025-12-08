@@ -1,45 +1,39 @@
 /* ===========================================================
    update_dim_customers.sql
-   SCD2 (Historical) — DimCustomers (Group 1)
+   SCD2 (Historical) — DimCustomers
    =========================================================== */
 
 ---------------------------------------------------------------
--- PARAMETERS passed from Python:
+-- PARAMETERS
 -- @database_name
 -- @schema_name
--- @dim_table_name        (DimCustomers)
--- @staging_table_name    (staging_Customers)
+-- @dim_table_name
+-- @staging_table_name
 ---------------------------------------------------------------
-
-DECLARE @SQL NVARCHAR(MAX);
-DECLARE @SOR_SK INT;
 
 ---------------------------------------------------------------
 -- 1. Ensure SOR entry exists
 ---------------------------------------------------------------
-SET @SQL = '
-INSERT INTO ' + QUOTENAME(@database_name) + '.dbo.Dim_SOR (SOR_Name)
-SELECT ''' + @staging_table_name + '''
+INSERT INTO @database_name.@schema_name.Dim_SOR (SOR_Name)
+SELECT '@staging_table_name'
 WHERE NOT EXISTS (
-    SELECT 1 
-    FROM ' + QUOTENAME(@database_name) + '.dbo.Dim_SOR
-    WHERE SOR_Name = ''' + @staging_table_name + '''
-);';
-
-EXEC(@SQL);
+    SELECT 1
+    FROM @database_name.@schema_name.Dim_SOR
+    WHERE SOR_Name = '@staging_table_name'
+);
 
 ---------------------------------------------------------------
--- 2. Retrieve SOR_SK
+-- 2. Fetch SOR_SK
 ---------------------------------------------------------------
+DECLARE @SOR_SK INT;
+
 SELECT @SOR_SK = SOR_SK
-FROM   ' + QUOTENAME(@database_name) + '.dbo.Dim_SOR
-WHERE  SOR_Name = @staging_table_name;
+FROM @database_name.@schema_name.Dim_SOR
+WHERE SOR_Name = '@staging_table_name';
 
 ---------------------------------------------------------------
--- 3. MERGE logic for SCD2 (detect changes)
+-- 3. SCD2 MERGE Logic — Close old row on change
 ---------------------------------------------------------------
-
-SET @SQL = '
 ;WITH INCOMING AS (
     SELECT
         CustomerID AS Customer_NK,
@@ -54,12 +48,11 @@ SET @SQL = '
         Phone,
         Fax,
         staging_raw_id_sk
-    FROM ' + QUOTENAME(@database_name) + '.' + QUOTENAME(@schema_name) + '.' + QUOTENAME(@staging_table_name) + '
+    FROM @database_name.@schema_name.@staging_table_name
 ),
-
 CURRENT_ROWS AS (
     SELECT *
-    FROM ' + QUOTENAME(@database_name) + '.' + QUOTENAME(@schema_name) + '.' + QUOTENAME(@dim_table_name) + '
+    FROM @database_name.@schema_name.@dim_table_name
     WHERE IsCurrent = 1
 )
 
@@ -67,26 +60,24 @@ MERGE CURRENT_ROWS AS TARGET
 USING INCOMING AS SOURCE
 ON TARGET.Customer_NK = SOURCE.Customer_NK
 
----------------------------------------------------------------
--- 3A. Change detected → close old row & insert new version
----------------------------------------------------------------
+-- 3A. Change detected → close the current row
 WHEN MATCHED AND (
-       ISNULL(TARGET.CompanyName,'''') <> ISNULL(SOURCE.CompanyName,'''')
-    OR ISNULL(TARGET.ContactName,'''') <> ISNULL(SOURCE.ContactName,'''')
-    OR ISNULL(TARGET.ContactTitle,'''') <> ISNULL(SOURCE.ContactTitle,'''')
-    OR ISNULL(TARGET.Address,'''') <> ISNULL(SOURCE.Address,'''')
-    OR ISNULL(TARGET.City,'''') <> ISNULL(SOURCE.City,'''')
-    OR ISNULL(TARGET.Region,'''') <> ISNULL(SOURCE.Region,'''')
-    OR ISNULL(TARGET.PostalCode,'''') <> ISNULL(SOURCE.PostalCode,'''')
-    OR ISNULL(TARGET.Country,'''') <> ISNULL(SOURCE.Country,'''')
-    OR ISNULL(TARGET.Phone,'''') <> ISNULL(SOURCE.Phone,'''')
-    OR ISNULL(TARGET.Fax,'''') <> ISNULL(SOURCE.Fax,'''')
+       ISNULL(TARGET.CompanyName,'')   <> ISNULL(SOURCE.CompanyName,'')
+    OR ISNULL(TARGET.ContactName,'')   <> ISNULL(SOURCE.ContactName,'')
+    OR ISNULL(TARGET.ContactTitle,'')  <> ISNULL(SOURCE.ContactTitle,'')
+    OR ISNULL(TARGET.Address,'')       <> ISNULL(SOURCE.Address,'')
+    OR ISNULL(TARGET.City,'')          <> ISNULL(SOURCE.City,'')
+    OR ISNULL(TARGET.Region,'')        <> ISNULL(SOURCE.Region,'')
+    OR ISNULL(TARGET.PostalCode,'')    <> ISNULL(SOURCE.PostalCode,'')
+    OR ISNULL(TARGET.Country,'')       <> ISNULL(SOURCE.Country,'')
+    OR ISNULL(TARGET.Phone,'')         <> ISNULL(SOURCE.Phone,'')
+    OR ISNULL(TARGET.Fax,'')           <> ISNULL(SOURCE.Fax,'')
 )
-THEN 
-    UPDATE SET
-        TARGET.ValidTo = GETDATE(),
-        TARGET.IsCurrent = 0
+THEN UPDATE SET
+       TARGET.ValidTo      = GETDATE(),
+       TARGET.IsCurrent    = 0
 
+-- 3B. New customer → insert fresh version
 WHEN NOT MATCHED BY TARGET
 THEN INSERT (
         Customer_NK,
@@ -119,22 +110,18 @@ THEN INSERT (
         SOURCE.Country,
         SOURCE.Phone,
         SOURCE.Fax,
-        GETDATE(),         -- ValidFrom
-        ''9999-12-31'',     -- ValidTo open-ended
-        1,                 -- IsCurrent
-        ' + CAST(@SOR_SK AS NVARCHAR) + ',
+        GETDATE(),          -- ValidFrom
+        '9999-12-31',       -- ValidTo open-ended
+        1,                  -- IsCurrent
+        @SOR_SK,
         SOURCE.staging_raw_id_sk,
         GETDATE()
     );
-';
-
-EXEC(@SQL);
 
 ---------------------------------------------------------------
--- 4. Insert new versions for customers whose old rows were closed
+-- 4. Insert new versions for closed rows (historical SCD2)
 ---------------------------------------------------------------
-SET @SQL = '
-INSERT INTO ' + QUOTENAME(@database_name) + '.' + QUOTENAME(@schema_name) + '.' + QUOTENAME(@dim_table_name) + ' (
+INSERT INTO @database_name.@schema_name.@dim_table_name (
         Customer_NK,
         CompanyName,
         ContactName,
@@ -154,37 +141,28 @@ INSERT INTO ' + QUOTENAME(@database_name) + '.' + QUOTENAME(@schema_name) + '.' 
         LoadDate
 )
 SELECT 
-    i.Customer_NK,
-    i.CompanyName,
-    i.ContactName,
-    i.ContactTitle,
-    i.Address,
-    i.City,
-    i.Region,
-    i.PostalCode,
-    i.Country,
-    i.Phone,
-    i.Fax,
-    GETDATE(),
-    ''9999-12-31'',
-    1,
-    ' + CAST(@SOR_SK AS NVARCHAR) + ',
-    i.staging_raw_id_sk,
+    S.CustomerID,
+    S.CompanyName,
+    S.ContactName,
+    S.ContactTitle,
+    S.Address,
+    S.City,
+    S.Region,
+    S.PostalCode,
+    S.Country,
+    S.Phone,
+    S.Fax,
+    GETDATE(),          -- ValidFrom
+    '9999-12-31',       -- ValidTo
+    1,                  -- IsCurrent
+    @SOR_SK,
+    S.staging_raw_id_sk,
     GETDATE()
-FROM (
-    SELECT CustomerID, staging_raw_id_sk,
-           CompanyName, ContactName, ContactTitle,
-           Address, City, Region, PostalCode,
-           Country, Phone, Fax
-    FROM ' + QUOTENAME(@database_name) + '.' + QUOTENAME(@schema_name) + '.' + QUOTENAME(@staging_table_name) + '
-) i
+FROM @database_name.@schema_name.@staging_table_name S
 WHERE EXISTS (
     SELECT 1
-    FROM ' + QUOTENAME(@database_name) + '.' + QUOTENAME(@schema_name) + '.' + QUOTENAME(@dim_table_name) + '
-    WHERE Customer_NK = i.CustomerID
-      AND IsCurrent = 0   -- old version was closed
-      AND ValidTo = CONVERT(DATE, GETDATE())
+    FROM @database_name.@schema_name.@dim_table_name D
+    WHERE D.Customer_NK = S.CustomerID
+      AND D.IsCurrent = 0
+      AND CAST(D.ValidTo AS DATE) = CAST(GETDATE() AS DATE)
 );
-';
-
-EXEC(@SQL);

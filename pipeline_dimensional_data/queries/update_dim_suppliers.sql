@@ -1,46 +1,42 @@
 /* ===========================================================
    update_dim_suppliers.sql
-   SCD4 (Mini-Dimension) — DimSuppliers (Group 1)
+   SCD4 — DimSuppliers
    =========================================================== */
 
 ---------------------------------------------------------------
--- PARAMETERS passed from Python:
+-- PARAMETERS
 -- @database_name
 -- @schema_name
--- @dim_table_name         (DimSuppliers)
--- @staging_table_name     (staging_Suppliers)
+-- @dim_table_name
+-- @staging_table_name
 ---------------------------------------------------------------
 
-DECLARE @SQL NVARCHAR(MAX);
-DECLARE @SOR_SK INT;
 
 ---------------------------------------------------------------
 -- 1. Ensure SOR entry exists
 ---------------------------------------------------------------
-SET @SQL = '
-INSERT INTO ' + QUOTENAME(@database_name) + '.dbo.Dim_SOR (SOR_Name)
-SELECT ''' + @staging_table_name + '''
+INSERT INTO @database_name.@schema_name.Dim_SOR (SOR_Name)
+SELECT '@staging_table_name'
 WHERE NOT EXISTS (
     SELECT 1
-    FROM ' + QUOTENAME(@database_name) + '.dbo.Dim_SOR
-    WHERE SOR_Name = ''' + @staging_table_name + '''
-);';
+    FROM @database_name.@schema_name.Dim_SOR
+    WHERE SOR_Name = '@staging_table_name'
+);
 
-EXEC(@SQL);
 
 ---------------------------------------------------------------
 -- 2. Retrieve SOR_SK
 ---------------------------------------------------------------
+DECLARE @SOR_SK INT;
+
 SELECT @SOR_SK = SOR_SK
-FROM   ' + QUOTENAME(@database_name) + '.dbo.Dim_SOR
-WHERE  SOR_Name = @staging_table_name;
+FROM @database_name.@schema_name.Dim_SOR
+WHERE SOR_Name = '@staging_table_name';
 
 ---------------------------------------------------------------
--- 3. MERGE (SCD4 — overwrite current row)
+-- 3. MERGE — SCD4 (overwrite existing record)
 ---------------------------------------------------------------
-
-SET @SQL = '
-MERGE ' + QUOTENAME(@database_name) + '.' + QUOTENAME(@schema_name) + '.' + QUOTENAME(@dim_table_name) + ' AS TARGET
+MERGE @database_name.@schema_name.@dim_table_name AS TARGET
 USING (
     SELECT
         SupplierID AS Supplier_NK,
@@ -55,14 +51,14 @@ USING (
         Phone,
         Fax,
         HomePage,
-        MiniGroup,           -- Mini-dimension attribute
         staging_raw_id_sk
-    FROM ' + QUOTENAME(@database_name) + '.' + QUOTENAME(@schema_name) + '.' + QUOTENAME(@staging_table_name) + '
+    FROM @database_name.@schema_name.@staging_table_name
 ) AS SOURCE
 ON TARGET.Supplier_NK = SOURCE.Supplier_NK
 
+
 ---------------------------------------------------------------
--- 3A. Update existing rows when changed (SCD4 = overwrite)
+-- 3A. Update existing rows when any attribute changed
 ---------------------------------------------------------------
 WHEN MATCHED AND (
        ISNULL(TARGET.CompanyName,'')   <> ISNULL(SOURCE.CompanyName,'')
@@ -76,27 +72,26 @@ WHEN MATCHED AND (
     OR ISNULL(TARGET.Phone,'')         <> ISNULL(SOURCE.Phone,'')
     OR ISNULL(TARGET.Fax,'')           <> ISNULL(SOURCE.Fax,'')
     OR ISNULL(TARGET.HomePage,'')      <> ISNULL(SOURCE.HomePage,'')
-    OR ISNULL(TARGET.MiniGroup,'')     <> ISNULL(SOURCE.MiniGroup,'')
 )
 THEN UPDATE SET
-       TARGET.CompanyName      = SOURCE.CompanyName,
-       TARGET.ContactName      = SOURCE.ContactName,
-       TARGET.ContactTitle     = SOURCE.ContactTitle,
-       TARGET.Address          = SOURCE.Address,
-       TARGET.City             = SOURCE.City,
-       TARGET.Region           = SOURCE.Region,
-       TARGET.PostalCode       = SOURCE.PostalCode,
-       TARGET.Country          = SOURCE.Country,
-       TARGET.Phone            = SOURCE.Phone,
-       TARGET.Fax              = SOURCE.Fax,
-       TARGET.HomePage         = SOURCE.HomePage,
-       TARGET.MiniGroup        = SOURCE.MiniGroup,
-       TARGET.SOR_SK           = ' + CAST(@SOR_SK AS NVARCHAR) + ',
+       TARGET.CompanyName       = SOURCE.CompanyName,
+       TARGET.ContactName       = SOURCE.ContactName,
+       TARGET.ContactTitle      = SOURCE.ContactTitle,
+       TARGET.Address           = SOURCE.Address,
+       TARGET.City              = SOURCE.City,
+       TARGET.Region            = SOURCE.Region,
+       TARGET.PostalCode        = SOURCE.PostalCode,
+       TARGET.Country           = SOURCE.Country,
+       TARGET.Phone             = SOURCE.Phone,
+       TARGET.Fax               = SOURCE.Fax,
+       TARGET.HomePage          = SOURCE.HomePage,
+       TARGET.SOR_SK            = @SOR_SK,
        TARGET.staging_raw_id_sk = SOURCE.staging_raw_id_sk,
-       TARGET.LoadDate         = GETDATE()
+       TARGET.LoadDate          = GETDATE()
+
 
 ---------------------------------------------------------------
--- 3B. Insert new supplier NK rows
+-- 3B. Insert new Supplier NK rows
 ---------------------------------------------------------------
 WHEN NOT MATCHED BY TARGET
 THEN INSERT (
@@ -112,7 +107,6 @@ THEN INSERT (
         Phone,
         Fax,
         HomePage,
-        MiniGroup,
         SOR_SK,
         staging_raw_id_sk,
         LoadDate
@@ -130,11 +124,7 @@ THEN INSERT (
         SOURCE.Phone,
         SOURCE.Fax,
         SOURCE.HomePage,
-        SOURCE.MiniGroup,
-        ' + CAST(@SOR_SK AS NVARCHAR) + ',
+        @SOR_SK,
         SOURCE.staging_raw_id_sk,
         GETDATE()
     );
-';
-
-EXEC(@SQL);

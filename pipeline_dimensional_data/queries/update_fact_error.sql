@@ -4,45 +4,43 @@
    =========================================================== */
 
 ---------------------------------------------------------------
--- PARAMETERS:
+-- PARAMETERS FROM PYTHON
 -- @database_name
 -- @schema_name
--- @fact_error_table_name
--- @orders_staging_table
--- @details_staging_table
+-- @fact_error_table
+-- @staging_table_name    
 -- @start_date
 -- @end_date
 ---------------------------------------------------------------
 
-DECLARE @SQL NVARCHAR(MAX);
-DECLARE @SOR_SK INT;
 
 ---------------------------------------------------------------
 -- 1. Ensure SOR entry exists
 ---------------------------------------------------------------
-SET @SQL = '
-INSERT INTO ' + QUOTENAME(@database_name) + '.dbo.Dim_SOR (SOR_Name)
-SELECT ''FACT_ORDERS_ERROR''
+INSERT INTO @database_name.@schema_name.Dim_SOR (SOR_Name)
+SELECT 'FACT_ORDERS_ERROR'
 WHERE NOT EXISTS (
     SELECT 1
-    FROM ' + QUOTENAME(@database_name) + '.dbo.Dim_SOR
-    WHERE SOR_Name = ''FACT_ORDERS_ERROR''
-);';
-EXEC(@SQL);
+    FROM @database_name.@schema_name.Dim_SOR
+    WHERE SOR_Name = 'FACT_ORDERS_ERROR'
+);
+
 
 ---------------------------------------------------------------
--- 2. Get SOR_SK
+-- 2. Load SOR_SK
 ---------------------------------------------------------------
+DECLARE @SOR_SK INT;
+
 SELECT @SOR_SK = SOR_SK
-FROM ' + QUOTENAME(@database_name) + '.dbo.Dim_SOR
-WHERE SOR_Name = ''FACT_ORDERS_ERROR'';
+FROM @database_name.@schema_name.Dim_SOR
+WHERE SOR_Name = 'FACT_ORDERS_ERROR';
+
 
 ---------------------------------------------------------------
--- 3. Insert errors
+-- 3. Insert missing-dimension errors
 ---------------------------------------------------------------
 
-SET @SQL = '
-INSERT INTO ' + QUOTENAME(@database_name) + '.' + QUOTENAME(@schema_name) + '.' + QUOTENAME(@fact_error_table_name) + ' (
+INSERT INTO @database_name.@schema_name.@fact_error_table (
     Order_NK,
     Product_NK,
     Customer_SK,
@@ -59,6 +57,7 @@ INSERT INTO ' + QUOTENAME(@database_name) + '.' + QUOTENAME(@schema_name) + '.' 
 SELECT
     o.OrderID,
     d.ProductID,
+
     dc.Customer_SK,
     de.Employee_SK,
     dp.Product_SK,
@@ -67,39 +66,39 @@ SELECT
     dr.Region_SK,
 
     CASE 
-         WHEN dc.Customer_SK IS NULL THEN ''Missing Customer_SK''
-         WHEN de.Employee_SK IS NULL THEN ''Missing Employee_SK''
-         WHEN dp.Product_SK  IS NULL THEN ''Missing Product_SK''
-         WHEN ds.Shipper_SK  IS NULL THEN ''Missing Shipper_SK''
-         WHEN dt.Territory_SK IS NULL THEN ''Missing Territory_SK''
-         WHEN dr.Region_SK IS NULL THEN ''Missing Region_SK''
-    END AS ErrorMessage,
+         WHEN dc.Customer_SK IS NULL THEN 'Missing Customer_SK'
+         WHEN de.Employee_SK IS NULL THEN 'Missing Employee_SK'
+         WHEN dp.Product_SK  IS NULL THEN 'Missing Product_SK'
+         WHEN ds.Shipper_SK  IS NULL THEN 'Missing Shipper_SK'
+         WHEN dt.Territory_SK IS NULL THEN 'Missing Territory_SK'
+         WHEN dr.Region_SK IS NULL THEN 'Missing Region_SK'
+    END,
 
-    ' + CAST(@SOR_SK AS NVARCHAR) + ' AS SOR_SK,
+    @SOR_SK,
     d.staging_raw_id_sk,
     GETDATE()
 
-FROM ' + QUOTENAME(@database_name) + '.' + QUOTENAME(@schema_name) + '.' + QUOTENAME(@details_staging_table) + ' d
-JOIN ' + QUOTENAME(@database_name) + '.' + QUOTENAME(@schema_name) + '.' + QUOTENAME(@orders_staging_table) + ' o
+FROM @database_name.@schema_name.staging_OrderDetails d
+JOIN @database_name.@schema_name.@staging_table_name o
     ON o.OrderID = d.OrderID
-    AND o.OrderDate BETWEEN ''' + @start_date + ''' AND ''' + @end_date + '''
+    AND o.OrderDate BETWEEN @start_date AND @end_date
 
-LEFT JOIN ' + QUOTENAME(@database_name) + '.dbo.DimCustomers dc
+LEFT JOIN @database_name.@schema_name.DimCustomers dc
     ON dc.Customer_NK = o.CustomerID AND dc.IsCurrent = 1
 
-LEFT JOIN ' + QUOTENAME(@database_name) + '.dbo.DimEmployees de
+LEFT JOIN @database_name.@schema_name.DimEmployees de
     ON de.Employee_NK = o.EmployeeID AND de.IsDeleted = 0
 
-LEFT JOIN ' + QUOTENAME(@database_name) + '.dbo.DimProducts dp
+LEFT JOIN @database_name.@schema_name.DimProducts dp
     ON dp.Product_NK = d.ProductID AND dp.IsCurrent = 1
 
-LEFT JOIN ' + QUOTENAME(@database_name) + '.dbo.DimShippers ds
+LEFT JOIN @database_name.@schema_name.DimShippers ds
     ON ds.Shipper_NK = o.ShipVia
 
-LEFT JOIN ' + QUOTENAME(@database_name) + '.dbo.DimTerritories dt
+LEFT JOIN @database_name.@schema_name.DimTerritories dt
     ON dt.Territory_NK = o.TerritoryID
 
-LEFT JOIN ' + QUOTENAME(@database_name) + '.dbo.DimRegion dr
+LEFT JOIN @database_name.@schema_name.DimRegion dr
     ON dr.Region_NK = o.ShipRegion
 
 WHERE 
@@ -109,6 +108,3 @@ WHERE
    OR ds.Shipper_SK  IS NULL
    OR dt.Territory_SK IS NULL
    OR dr.Region_SK IS NULL;
-';
-
-EXEC(@SQL);

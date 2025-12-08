@@ -15,4 +15,3 @@ ELSE
 BEGIN
     PRINT 'ORDER_DDS database already exists.';
 END;
-GO

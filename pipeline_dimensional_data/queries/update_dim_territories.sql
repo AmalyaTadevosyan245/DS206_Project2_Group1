@@ -4,43 +4,39 @@
    =========================================================== */
 
 ---------------------------------------------------------------
--- PARAMETERS passed from Python:
+-- PARAMETERS:
 -- @database_name
 -- @schema_name
--- @dim_table_name         (DimTerritories)
--- @staging_table_name     (staging_Territories)
+-- @dim_table_name
+-- @staging_table_name
 ---------------------------------------------------------------
-
-DECLARE @SQL NVARCHAR(MAX);
-DECLARE @SOR_SK INT;
 
 ---------------------------------------------------------------
 -- 1. Ensure SOR entry exists
 ---------------------------------------------------------------
-SET @SQL = '
-INSERT INTO ' + QUOTENAME(@database_name) + '.dbo.Dim_SOR (SOR_Name)
-SELECT ''' + @staging_table_name + '''
+INSERT INTO @database_name.@schema_name.Dim_SOR (SOR_Name)
+SELECT '@staging_table_name'
 WHERE NOT EXISTS (
     SELECT 1
-    FROM ' + QUOTENAME(@database_name) + '.dbo.Dim_SOR
-    WHERE SOR_Name = ''' + @staging_table_name + '''
-);';
+    FROM @database_name.@schema_name.Dim_SOR
+    WHERE SOR_Name = '@staging_table_name'
+);
 
-EXEC(@SQL);
 
 ---------------------------------------------------------------
--- 2. Get SOR_SK
+-- 2. Retrieve SOR_SK
 ---------------------------------------------------------------
+DECLARE @SOR_SK INT;
+
 SELECT @SOR_SK = SOR_SK
-FROM   ' + QUOTENAME(@database_name) + '.dbo.Dim_SOR
-WHERE  SOR_Name = @staging_table_name;
+FROM @database_name.@schema_name.Dim_SOR
+WHERE SOR_Name = '@staging_table_name';
+
 
 ---------------------------------------------------------------
--- 3. MERGE (SCD3 logic)
+-- 3. MERGE (Unified SCD3 Logic)
 ---------------------------------------------------------------
-
-SET @SQL = '
-MERGE ' + QUOTENAME(@database_name) + '.' + QUOTENAME(@schema_name) + '.' + QUOTENAME(@dim_table_name) + ' AS TARGET
+MERGE @database_name.@schema_name.@dim_table_name AS TARGET
 USING (
     SELECT
         TerritoryID AS Territory_NK,
@@ -48,41 +44,42 @@ USING (
         TerritoryCode,
         RegionID AS Region_NK,
         staging_raw_id_sk
-    FROM ' + QUOTENAME(@database_name) + '.' + QUOTENAME(@schema_name) + '.' + QUOTENAME(@staging_table_name) + '
+    FROM @database_name.@schema_name.@staging_table_name
 ) AS SOURCE
 ON TARGET.Territory_NK = SOURCE.Territory_NK
 
+
 ---------------------------------------------------------------
--- 3A. If TerritoryDescription changed → SCD3 behavior
+-- SINGLE MATCHED CLAUSE 
 ---------------------------------------------------------------
-WHEN MATCHED AND 
-    ISNULL(TARGET.TerritoryDescription_Current,'''') 
-        <> ISNULL(SOURCE.TerritoryDescription,'''')
+WHEN MATCHED AND (
+       ISNULL(TARGET.TerritoryDescription_Current,'') <> ISNULL(SOURCE.TerritoryDescription,'')
+    OR ISNULL(TARGET.TerritoryCode,'') <> ISNULL(SOURCE.TerritoryCode,'')
+    OR ISNULL(TARGET.Region_NK,-1) <> ISNULL(SOURCE.Region_NK,-1)
+)
 THEN UPDATE SET
-       TARGET.TerritoryDescription_Prior   = TARGET.TerritoryDescription_Current,
+
+       -- Only shift prior value when description actually changed
+       TARGET.TerritoryDescription_Prior =
+            CASE
+                WHEN ISNULL(TARGET.TerritoryDescription_Current,'') 
+                        <> ISNULL(SOURCE.TerritoryDescription,'')
+                THEN TARGET.TerritoryDescription_Current
+                ELSE TARGET.TerritoryDescription_Prior
+            END,
+
+       -- Always update current values
        TARGET.TerritoryDescription_Current = SOURCE.TerritoryDescription,
        TARGET.TerritoryCode                = SOURCE.TerritoryCode,
        TARGET.Region_NK                    = SOURCE.Region_NK,
+
+       TARGET.SOR_SK                       = @SOR_SK,
        TARGET.staging_raw_id_sk            = SOURCE.staging_raw_id_sk,
-       TARGET.SOR_SK                       = ' + CAST(@SOR_SK AS NVARCHAR) + ',
        TARGET.LoadDate                     = GETDATE()
 
----------------------------------------------------------------
--- 3B. Other attribute changes (overwrite in place)
----------------------------------------------------------------
-WHEN MATCHED AND (
-      ISNULL(TARGET.TerritoryCode,'''') <> ISNULL(SOURCE.TerritoryCode,'''')
-   OR ISNULL(TARGET.Region_NK,-1)       <> ISNULL(SOURCE.Region_NK,-1)
-)
-THEN UPDATE SET
-       TARGET.TerritoryCode                = SOURCE.TerritoryCode,
-       TARGET.Region_NK                    = SOURCE.Region_NK,
-       TARGET.staging_raw_id_sk            = SOURCE.staging_raw_id_sk,
-       TARGET.SOR_SK                       = ' + CAST(@SOR_SK AS NVARCHAR) + ',
-       TARGET.LoadDate                     = GETDATE()
 
 ---------------------------------------------------------------
--- 3C. Insert new NK rows
+-- INSERT NEW ROWS
 ---------------------------------------------------------------
 WHEN NOT MATCHED BY TARGET
 THEN INSERT (
@@ -97,14 +94,11 @@ THEN INSERT (
     )
     VALUES (
         SOURCE.Territory_NK,
-        SOURCE.TerritoryDescription,   -- becomes Current
-        NULL,                          -- no prior on first load
+        SOURCE.TerritoryDescription,
+        NULL,
         SOURCE.TerritoryCode,
         SOURCE.Region_NK,
-        ' + CAST(@SOR_SK AS NVARCHAR) + ',
+        @SOR_SK,
         SOURCE.staging_raw_id_sk,
         GETDATE()
     );
-';
-
-EXEC(@SQL);
