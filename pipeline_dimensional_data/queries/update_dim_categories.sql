@@ -29,11 +29,15 @@ WHERE NOT EXISTS (
 EXEC(@SQL);
 
 ---------------------------------------------------------------
--- 2. Get SOR_SK
+-- 2. Get SOR_SK  (must be dynamic SQL)
 ---------------------------------------------------------------
-SELECT @SOR_SK = SOR_SK
-FROM   ' + QUOTENAME(@database_name) + '.dbo.Dim_SOR
-WHERE  SOR_Name = @staging_table_name;
+SET @SQL = '
+SELECT @SOR_SK_OUT = SOR_SK
+FROM ' + QUOTENAME(@database_name) + '.dbo.Dim_SOR
+WHERE SOR_Name = ''' + @staging_table_name + ''';';
+
+EXEC sp_executesql @SQL, N'@SOR_SK_OUT INT OUTPUT', @SOR_SK_OUT=@SOR_SK OUTPUT;
+
 
 ---------------------------------------------------------------
 -- 3. MERGE (SCD1 + Delete Handling)
@@ -85,12 +89,14 @@ THEN INSERT (
      );
 
 ---------------------------------------------------------------
--- 4. Soft-delete rows not present in staging
+-- 4. Soft-delete rows not present in staging  (DYNAMIC SQL)
 ---------------------------------------------------------------
+
+SET @SQL = '
 UPDATE T
 SET    T.IsDeleted = 1,
        T.LoadDate  = GETDATE(),
-       T.SOR_SK    = ' + CAST(@SOR_SK AS NVARCHAR) + '
+       T.SOR_SK    = ' + CAST(@SOR_SK AS NVARCHAR(MAX)) + '
 FROM   ' + QUOTENAME(@database_name) + '.' + QUOTENAME(@schema_name) + '.' + QUOTENAME(@dim_table_name) + ' T
 LEFT JOIN ' + QUOTENAME(@database_name) + '.' + QUOTENAME(@schema_name) + '.' + QUOTENAME(@staging_table_name) + ' S
        ON S.CategoryID = T.Category_NK
@@ -99,3 +105,4 @@ WHERE  S.CategoryID IS NULL
 ';
 
 EXEC(@SQL);
+
