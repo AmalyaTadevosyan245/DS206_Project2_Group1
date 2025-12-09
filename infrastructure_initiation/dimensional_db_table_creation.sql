@@ -18,6 +18,7 @@ DROP TABLE IF EXISTS DimEmployees;
 DROP TABLE IF EXISTS DimCustomers;
 DROP TABLE IF EXISTS DimCategories;
 DROP TABLE IF EXISTS Dim_SOR;
+DROP TABLE IF EXISTS FactOrders_Error;
 
 
 /* ===========================================================
@@ -282,4 +283,20 @@ CREATE TABLE FactOrders (
     FOREIGN KEY (Shipper_SK)  REFERENCES DimShippers(Shipper_SK),
     FOREIGN KEY (Territory_SK) REFERENCES DimTerritories(Territory_SK),
     FOREIGN KEY (Region_SK)   REFERENCES DimRegion(Region_SK)
+);
+
+CREATE TABLE dbo.FactOrders_Error (
+    ErrorID           INT IDENTITY(1,1) PRIMARY KEY,
+    Order_NK          INT,
+    Product_NK        INT,
+    Customer_SK       INT,
+    Employee_SK       INT,
+    Product_SK        INT,
+    Shipper_SK        INT,
+    Territory_SK      INT,
+    Region_SK         INT,
+    ErrorMessage      NVARCHAR(255),
+    SOR_SK            INT,
+    staging_raw_id_sk INT,
+    LoadDate          DATETIME DEFAULT GETDATE()
 );

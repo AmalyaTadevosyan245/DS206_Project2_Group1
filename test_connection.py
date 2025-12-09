@@ -28,9 +28,17 @@
 # print(task_update_dim_territories({"success": True}))
 
 
-from pipeline_dimensional_data.tasks import (
-    task_update_factorders
-)
+from utils import load_db_config, create_db_connection
+from pipeline_dimensional_data.tasks import task_update_factorders
+
+
+cfg = load_db_config()
+conn = create_db_connection(cfg)
+
+cursor = conn.cursor()
+cursor.execute("SELECT name FROM sys.databases")
+print(cursor.fetchall())
+conn.close()
 
 result = task_update_factorders(
     prereq={"success": True},

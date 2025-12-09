@@ -12,6 +12,8 @@ import os
 import sys
 import openpyxl
 
+from pipeline_dimensional_data.config import database_name, schema_name
+
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, PROJECT_ROOT)
 
@@ -59,20 +61,34 @@ def run_sql_task(sql_path: str, params: dict) -> dict:
         return {"success": False, "message": str(e)}
 
 
+def task_initialize_dimensional_db(prereq=None) -> dict:
+    sql_files = [
+        ("infrastructure_initiation/dimensional_db_creation.sql", "dimensional_db_creation.sql"),
+        ("infrastructure_initiation/staging_raw_table_creation.sql", "staging_raw_table_creation.sql"),
+        ("infrastructure_initiation/dimensional_db_table_creation.sql", "dimensional_db_table_creation.sql"),
+    ]
+
+    for rel_path, label in sql_files:
+        sql_path = os.path.join(PROJECT_ROOT, rel_path)
+        print(f"Running {label}...")
+        result = run_sql_task(sql_path, {"database_name": database_name, "schema_name": schema_name})
+        if not result.get("success"):
+            return {"success": False, "message": f"{label} failed: {result.get('message')}"}
+
+    return {"success": True, "message": "Dimensional database initialized"}
+
 # ==============================================================
 # 1. Create Dimensional Tables
 # ==============================================================
 
-def task_create_dimensional_tables() -> dict:
+def task_create_dimensional_tables(prereq=None) -> dict:
     sql_path = os.path.join(
         PROJECT_ROOT, "infrastructure_initiation", "dimensional_db_table_creation.sql"
     )
-
     params = {
-        "database_name": "ORDER_DDS",
-        "schema_name": "dbo"
+        "database_name": database_name,
+        "schema_name": schema_name
     }
-
     return run_sql_task(sql_path, params)
 
 
@@ -206,11 +222,13 @@ def task_update_factorders(prereq=None, start_date=None, end_date=None) -> dict:
     )
 
     params = {
-        "database_name": "ORDER_DDS",
-        "schema_name": "dbo",
+        "database_name": database_name,
+        "schema_name": schema_name,
         "fact_table_name": "FactOrders",
         "orders_staging_table": "staging_Orders",
-        "details_staging_table": "staging_OrderDetails"
+        "details_staging_table": "staging_OrderDetails",
+        "start_date": start_date,
+        "end_date": end_date
     }
 
     return run_sql_task(sql_path, params)
@@ -232,19 +250,23 @@ def task_update_fact(start_date, end_date, prereq=None) -> dict:
     return run_sql_task(sql_path, params)
 
 
-def task_update_fact_error(start_date, end_date, prereq=None) -> dict:
-    if prereq and not prereq.get("success"):
-        return {"success": False, "message": "Prerequisite failed"}
+# def task_update_fact_error(prereq=None, start_date=None, end_date=None) -> dict:
+#     if prereq and not prereq.get("success"):
+#         return {"success": False, "message": "Prerequisite failed"}
 
-    sql_path = os.path.join(PROJECT_ROOT, "pipeline_dimensional_data/queries/update_fact_error.sql")
-    params = {
-        "database_name": "ORDER_DDS",
-        "schema_name": "dbo",
-        "fact_error_table": "FactOrders_Error",
-        "staging_table_name": "staging_Orders",
-        "start_date": start_date,
-        "end_date": end_date
-    }
+#     sql_path = os.path.join(
+#         PROJECT_ROOT,
+#         "pipeline_dimensional_data/queries/update_fact_error.sql"
+#     )
+
+#     params = {
+#         "database_name": database_name,
+#         "schema_name": schema_name,
+#         "start_date": start_date,
+#         "end_date": end_date
+#     }
+
+#     return run_sql_task(sql_path, params)
 
 # ==============================================================
 # Table Population
