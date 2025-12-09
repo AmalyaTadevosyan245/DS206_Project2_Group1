@@ -10,6 +10,7 @@ Each task:
 
 import os
 import sys
+import openpyxl
 
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, PROJECT_ROOT)
@@ -244,4 +245,68 @@ def task_update_fact_error(start_date, end_date, prereq=None) -> dict:
         "start_date": start_date,
         "end_date": end_date
     }
+
+# ==============================================================
+# Table Population
+# ==============================================================
+
+SOURCE_PATH = "raw_data_source.xlsx"
+STAGING_TABLES = {
+    "staging_Categories": (SOURCE_PATH, "Categories"),
+    "staging_Customers": (SOURCE_PATH, "Customers"),
+    "staging_Employees": (SOURCE_PATH, "Employees"),
+    "staging_OrderDetails": (SOURCE_PATH, "OrderDetails"),
+    "staging_Orders": (SOURCE_PATH, "Orders"),
+    "staging_Products": (SOURCE_PATH, "Products"),
+    "staging_Region": (SOURCE_PATH, "Region"),
+    "staging_Shippers": (SOURCE_PATH, "Shippers"),
+    "staging_Suppliers": (SOURCE_PATH, "Suppliers"),
+    "staging_Territories": (SOURCE_PATH, "Territories"),
+}
+
+def populate_table_from_excel(cursor, table_name, sheet):
+    """Insert all rows from an Excel sheet into the corresponding staging table."""
+    num_cols = sheet.max_column
+    placeholders = ", ".join(["?"] * num_cols)
+    query = f"INSERT INTO {table_name} VALUES ({placeholders})"
+
+    for row in sheet.iter_rows(min_row=2, max_row=sheet.max_row, values_only=True):
+        cursor.execute(query, row)
+    cursor.commit()
+
+
+def task_populate_staging(prereq=None) -> dict:
+    """
+    Populate all staging tables from Excel file.
+
+    Args:
+        prereq (dict): prerequisite task result
+
+    Returns:
+        dict: {'success': True/False, 'message': "..."}
+    """
+    if prereq and not prereq.get("success", False):
+        return {"success": False, "message": "Prerequisite failed"}
+
+    try:
+        cfg = load_db_config()
+        conn = create_db_connection(cfg)
+        cursor = conn.cursor()
+
+        for table_name, (default_file, sheet_name) in STAGING_TABLES.items():
+            file_path = default_file
+            if not os.path.exists(file_path):
+                print(f"Excel file not found: {file_path}, skipping {table_name}")
+                continue
+
+            print(f"Populating {table_name} from {file_path} / sheet {sheet_name}")
+            wb = openpyxl.load_workbook(file_path, data_only=True)
+            sheet = wb[sheet_name]
+            populate_table_from_excel(cursor, table_name, sheet)
+
+        conn.close()
+        return {"success": True}
+
+    except Exception as e:
+        return {"success": False, "message": str(e)}
     return run_sql_task(sql_path, params)
