@@ -24,6 +24,7 @@ import logging
 
 # Import all tasks
 from pipeline_dimensional_data.tasks import (
+    task_populate_staging,
     task_create_dimensional_tables,
     task_update_dim_categories,
     task_update_dim_customers,
@@ -116,48 +117,45 @@ class DimensionalDataFlow:
         return result
 
 
+def exec(self, start_date, end_date):
+    logger.info(f"Pipeline execution started | start_date={start_date} end_date={end_date}")
 
-    # ----------------------------------------------------------
-    # EXECUTION of full pipeline
-    # ----------------------------------------------------------
-    def exec(self, start_date, end_date):
-        logger.info(f"Pipeline execution started | start_date={start_date} end_date={end_date}")
+    # 0. Populate staging tables first
+    t0 = self._run_task(task_populate_staging)
 
-        # 1. Create all dimensional tables
-        t1 = self._run_task(task_create_dimensional_tables)
+    # 1. Create all dimensional tables
+    t1 = self._run_task(task_create_dimensional_tables, prereq=t0)
 
-        # 2. Load SCD1/SCD2 dimensions
-        t2 = self._run_task(task_update_dim_categories, t1)
-        t3 = self._run_task(task_update_dim_customers, t2)
-        t4 = self._run_task(task_update_dim_employees, t3)
-        t5 = self._run_task(task_update_dim_products, t4)
-        t6 = self._run_task(task_update_dim_region, t5)
-        t7 = self._run_task(task_update_dim_shippers, t6)
-        t8 = self._run_task(task_update_dim_suppliers, t7)
-        t9 = self._run_task(task_update_dim_territories, t8)
+    # 2. Load SCD1/SCD2 dimensions
+    t2 = self._run_task(task_update_dim_categories, prereq=t1)
+    t3 = self._run_task(task_update_dim_customers, prereq=t2)
+    t4 = self._run_task(task_update_dim_employees, prereq=t3)
+    t5 = self._run_task(task_update_dim_products, prereq=t4)
+    t6 = self._run_task(task_update_dim_region, prereq=t5)
+    t7 = self._run_task(task_update_dim_shippers, prereq=t6)
+    t8 = self._run_task(task_update_dim_suppliers, prereq=t7)
+    t9 = self._run_task(task_update_dim_territories, prereq=t8)
 
-        # 3. Load snapshot fact table
-        t_fact = self._run_task(
-            task_update_factorders,
-            t9,
-            start_date=start_date,
-            end_date=end_date
-        )
+    # 3. Load snapshot fact table
+    t_fact = self._run_task(
+        task_update_factorders,
+        prereq=t9,
+        start_date=start_date,
+        end_date=end_date
+    )
 
-        # 4. Load fact_error table
-        t_error = self._run_task(
-            task_update_fact_error,
-            t_fact,
-            start_date=start_date,
-            end_date=end_date
-        )
+    # 4. Load fact_error table
+    t_error = self._run_task(
+        task_update_fact_error,
+        prereq=t_fact,
+        start_date=start_date,
+        end_date=end_date
+    )
 
-        # Final status
-        final_success = t_error.get("success", False)
+    final_success = t_error.get("success", False)
+    if final_success:
+        logger.info("Pipeline completed successfully.")
+    else:
+        logger.error("Pipeline failed before completion.")
 
-        if final_success:
-            logger.info("Pipeline completed successfully.")
-        else:
-            logger.error("Pipeline failed before completion.")
-
-        return {"success": final_success, "execution_id": self.execution_id}
+    return {"success": final_success, "execution_id": self.execution_id}
